@@ -17,9 +17,13 @@ const SELECT_CLASS = "rounded border border-slate-300 bg-white px-2 py-1.5 text-
 const DEFAULT_STATUS: DisputeStatus = "open";
 const DEFAULT_SORT: DisputeSort = "deadline_asc";
 
-export default async function ChargebacksQueuePage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; sort?: string }> }) {
+type Param = string | string[] | undefined;
+const first = (v: Param) => (Array.isArray(v) ? v[0] : v);
+
+export default async function ChargebacksQueuePage({ searchParams }: { searchParams: Promise<{ q?: Param; status?: Param; sort?: Param }> }) {
   await requireAccess(manifest.readPermission);
-  const { q = "", status: rawStatus, sort: rawSort } = await searchParams;
+  const params = await searchParams;
+  const [q = "", rawStatus, rawSort] = [first(params.q), first(params.status), first(params.sort)];
   // The queue defaults to open disputes; "all" lifts the status filter.
   const status: DisputeStatus | undefined =
     rawStatus === "all" ? undefined : (STATUSES as readonly string[]).includes(rawStatus ?? "") ? (rawStatus as DisputeStatus) : DEFAULT_STATUS;
@@ -37,7 +41,8 @@ export default async function ChargebacksQueuePage({ searchParams }: { searchPar
         <Stat label="Open amount" value={fmtMoney(open.reduce((sum, d) => sum + d.amountCents, 0))} />
         <Stat label="Open over $1,000" value={open.filter((d) => d.contestNeedsApproval).length} tone="yellow" />
       </div>
-      <form action="/apps/chargebacks" className="mb-4 flex flex-wrap gap-2">
+      {/* Keyed so the uncontrolled inputs reset to the URL's values on client navigation (e.g. Clear). */}
+      <form key={`${q}|${status ?? "all"}|${sort}`} action="/apps/chargebacks" className="mb-4 flex flex-wrap gap-2">
         <input name="q" defaultValue={q} placeholder="Search cardholder, merchant ref, reason code, card last 4 or dispute #"
           className="w-full max-w-md rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none" />
         <select name="status" defaultValue={status ?? "all"} aria-label="Dispute status" className={SELECT_CLASS}>
