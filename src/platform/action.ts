@@ -41,6 +41,8 @@ export type ActionDef<S extends z.ZodType, R> = {
   approval?: ApprovalPolicy<z.infer<S>>;
   /** Audit target for this invocation, e.g. `refund:${input.refundId}`. */
   target?: (input: z.infer<S>) => string;
+  /** Free-text input fields that may contain customer data; replaced with "[redacted]" in every audit entry (success, request, error). */
+  redact?: (keyof z.infer<S> & string)[];
   /** Synchronous; runs inside a DB transaction together with its audit entry. Return a message or data. */
   run: (input: z.infer<S>, ctx: ActionContext) => R;
 };
@@ -53,6 +55,13 @@ export type PlatformAction = ((prev: ActionState, formData: FormData) => Promise
   invoke: (user: User, input: unknown, reason?: string) => ActionState;
 };
 
+function auditInput<S extends z.ZodType, R>(def: ActionDef<S, R>, input: unknown): unknown {
+  if (!def.redact?.length || !input || typeof input !== "object") return input;
+  const copy: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+  for (const k of def.redact) if (k in copy) copy[k] = "[redacted]";
+  return copy;
+}
+
 /** Executes the action body and writes its audit entry. Caller must hold a transaction. */
 export function perform<S extends z.ZodType, R>(
   def: ActionDef<S, R>,
@@ -62,7 +71,7 @@ export function perform<S extends z.ZodType, R>(
   extra: { approvedBy?: User; approvalId?: number } = {},
 ): R {
   let target = def.target?.(input);
-  const details: Record<string, unknown> = { input };
+  const details: Record<string, unknown> = { input: auditInput(def, input) };
   const result = def.run(input, {
     user,
     approvedBy: extra.approvedBy,
@@ -101,7 +110,7 @@ function execute<S extends z.ZodType, R>(def: ActionDef<S, R>, user: User, raw: 
         const requestId = Number(res.lastInsertRowid);
         writeAudit({
           actorId: user.id, app: def.app, action: def.name, outcome: "requested", target: target ?? undefined, reason,
-          details: { input, approvalId: requestId, approverPermission: policy.approverPermission },
+          details: { input: auditInput(def, input), approvalId: requestId, approverPermission: policy.approverPermission },
         });
         return requestId;
       });
@@ -111,7 +120,7 @@ function execute<S extends z.ZodType, R>(def: ActionDef<S, R>, user: User, raw: 
     return typeof result === "string" ? { ok: true, message: result } : { ok: true, message: "Done.", data: result };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    writeAudit({ actorId: user.id, app: def.app, action: def.name, outcome: "error", target: def.target?.(input), reason, details: { input, error: msg } });
+    writeAudit({ actorId: user.id, app: def.app, action: def.name, outcome: "error", target: def.target?.(input), reason, details: { input: auditInput(def, input), error: msg } });
     if (!(e instanceof ActionError)) console.error(e);
     return { ok: false, message: e instanceof ActionError ? msg : "Unexpected error (logged)." };
   }

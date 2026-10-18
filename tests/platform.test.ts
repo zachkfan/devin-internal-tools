@@ -1,5 +1,7 @@
 // Behavioural tests for the platform primitives, exercised through the KYC reference app.
 import { beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { defineAction } from "@/platform/action";
 import { claimCase, decideCase, revealPii } from "@/app/apps/kyc/_app/actions";
 import { getCase } from "@/app/apps/kyc/_app/queries";
 import { decide, decisionBanner, getRequest, pendingFor } from "@/platform/approvals";
@@ -111,6 +113,28 @@ describe("PII", () => {
     expect(res?.data).toEqual({ value: raw });
     expect(lastAudit()).toMatchObject({ actorId: "ana", action: "reveal_pii", outcome: "success", reason: "verifying ID document" });
     expect(lastAudit().details).not.toContain(raw);
+  });
+});
+
+describe("audit redaction", () => {
+  const SECRET = "Jane Roe called from 555-0100";
+  const noteAction = (run: () => string) => defineAction({
+    app: "kyc", name: "test_note", permission: "kyc:decide", requireReason: false, redact: ["note"],
+    input: z.object({ caseId: z.coerce.number(), note: z.string() }), run,
+  });
+
+  it("keeps redacted fields out of success entries", () => {
+    expect(noteAction(() => "ok").invoke(u("ana"), { caseId: 1, note: SECRET })?.ok).toBe(true);
+    expect(lastAudit()).toMatchObject({ outcome: "success" });
+    expect(lastAudit().details).not.toContain(SECRET);
+    expect(lastAudit().details).toContain("[redacted]");
+  });
+
+  it("keeps redacted fields out of unexpected-error entries", () => {
+    const res = noteAction(() => { throw new Error("db down"); }).invoke(u("ana"), { caseId: 1, note: SECRET });
+    expect(res).toMatchObject({ ok: false, message: "Unexpected error (logged)." });
+    expect(lastAudit()).toMatchObject({ outcome: "error" });
+    expect(lastAudit().details).not.toContain(SECRET);
   });
 });
 

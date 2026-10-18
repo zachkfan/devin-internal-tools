@@ -72,7 +72,7 @@ The three cloud sessions were started in parallel from the web app between about
 | Refunds | Devin Cloud, `specs/refunds.md` | 01:59 (#1) | 1 scope addition: "add sorting and filtering" | 2 minor findings (sub-cent amounts, LIKE wildcards). The session fixed both in the same minute, unprompted | 02:27 |
 | Feature flags | Devin Cloud, `specs/flags.md` | 02:01 (#2) | 1 coordination: "fix the merge conflict" | 2 🔴 upgrade-path findings (a column and payload field added mid-PR break databases created before that change; moot here since that schema never reached `main`) + 1 🟡 (success message lost after a dev/staging change). **Not addressed before merge** | 02:37 |
 | Chargebacks (new, one-paragraph spec) | Devin Cloud, `specs/chargebacks.md` | 02:04 (#3) | 1 scope addition: "match the refunds sort/filter" | 1 🟥 security finding (evidence-note text could reach the audit log on failure). The session had already closed the main path; it replied with an assessment and escalated the remaining case as a platform proposal | 02:33 |
-| Approvals confirmation fix (a core bug the refunds session reported) | Devin CLI (local), platform owner's request | n/a | n/a | n/a | this change |
+| Platform follow-ups: approvals confirmation (bug reported by the refunds session) + `redact` option for audit entries (escalated by the chargebacks session) | Devin CLI (local), platform owner's request | via PR | n/a | n/a | this change |
 
 - **Human messages that fixed a Devin mistake: 0.** All three messages were scope additions or merge coordination.
 - **Shared core touched by app PRs:** only the two registration lines. Guardrail tests, platform tests, dependencies and CI were unchanged across about 20 Devin commits.
@@ -80,5 +80,5 @@ The three cloud sessions were started in parallel from the web app between about
 - **Two PRs were merged with Devin Review findings still open.** The tooling surfaced them; a human merged anyway. Review findings need to block merges (branch protection), not just inform them.
 - **Gaps in the platform that the sessions exposed:**
   - No schema-migration mechanism. Schemas are `CREATE TABLE IF NOT EXISTS`, so adding a column to an existing app needs versioned migrations.
-  - `defineAction` audits the full input on unexpected errors, so free-text fields need a redaction option.
+  - `defineAction` audited the full input on unexpected errors. **Fixed:** actions can now declare `redact: ["field"]`, and chargebacks uses it for evidence notes.
   - The mandatory "reason" is free text visible to audit readers, so a "no customer PII in reasons" policy is needed.
