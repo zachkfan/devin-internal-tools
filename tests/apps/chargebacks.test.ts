@@ -32,11 +32,48 @@ describe("seed + queue", () => {
   });
 
   it("open queue is sorted by deadline and flags < 3 days left as urgent", () => {
-    const open = listDisputes("open");
+    const open = listDisputes("", { status: "open" });
     expect(open.map((d) => d.respondBy)).toEqual([...open.map((d) => d.respondBy)].sort());
     for (const d of open) expect(d.urgent).toBe(d.daysLeft < 3);
     expect(open.some((d) => d.urgent)).toBe(true);
     expect(open.some((d) => !d.urgent)).toBe(true);
+  });
+
+  it("sorts disputes by deadline (default), amount and opened date", () => {
+    const isSorted = (xs: (number | string)[], dir: 1 | -1) => xs.every((x, i) => i === 0 || (xs[i - 1] < x ? 1 : xs[i - 1] > x ? -1 : 0) * dir >= 0);
+    expect(isSorted(listDisputes().map((d) => d.respondBy), 1)).toBe(true);
+    expect(isSorted(listDisputes("", { sort: "deadline_desc" }).map((d) => d.respondBy), -1)).toBe(true);
+    expect(isSorted(listDisputes("", { sort: "amount_desc" }).map((d) => d.amountCents), -1)).toBe(true);
+    expect(isSorted(listDisputes("", { sort: "amount_asc" }).map((d) => d.amountCents), 1)).toBe(true);
+    expect(isSorted(listDisputes("", { sort: "opened_desc" }).map((d) => d.openedAt), -1)).toBe(true);
+    expect(isSorted(listDisputes("", { sort: "opened_asc" }).map((d) => d.openedAt), 1)).toBe(true);
+    expect(listDisputes("", { sort: "bogus" as never }).map((d) => d.id)).toEqual(listDisputes().map((d) => d.id));
+  });
+
+  it("filters disputes by status", () => {
+    const all = listDisputes();
+    for (const status of ["open", "accepted", "contested"] as const) {
+      const rows = listDisputes("", { status });
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((d) => d.status === status)).toBe(true);
+      expect(rows.length).toBe(all.filter((d) => d.status === status).length);
+    }
+  });
+
+  it("searches by cardholder, merchant ref, reason code, card last 4 and dispute id", () => {
+    const d = listDisputes()[0];
+    const row = db().prepare("SELECT card_last4 FROM chargebacks_disputes WHERE id = ?").get(d.id) as { card_last4: string };
+    const ids = (q: string, status?: "open") => listDisputes(q, { status }).map((x) => x.id);
+    expect(ids(d.cardholderName.split(" ")[1].toLowerCase())).toContain(d.id);
+    expect(ids(d.merchantRef)).toContain(d.id);
+    expect(ids(d.reasonCode)).toContain(d.id);
+    expect(ids(row.card_last4)).toContain(d.id);
+    expect(ids(String(d.id))).toContain(d.id);
+    expect(ids("no such thing")).toEqual([]);
+    expect(ids("%")).toEqual([]);
+    expect(ids("_")).toEqual([]);
+    const closed = listDisputes("", { status: "accepted" })[0];
+    expect(ids(closed.merchantRef, "open")).toEqual([]);
   });
 
   it("computes whole days left in UTC", () => {

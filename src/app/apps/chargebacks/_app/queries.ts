@@ -54,10 +54,35 @@ const toDispute = (r: Row & { evidence_count: number }): Dispute => {
   };
 };
 
-/** Open disputes are sorted by deadline (most urgent first); closed ones by most recently decided. */
-export function listDisputes(status: DisputeStatus): Dispute[] {
-  const order = status === "open" ? "d.respond_by, d.amount_cents DESC" : "d.decided_at DESC";
-  const rows = db().prepare(`${SELECT} WHERE d.status = ? ORDER BY ${order}`).all(status) as (Row & { evidence_count: number })[];
+const DISPUTE_ORDER = {
+  deadline_asc: "d.respond_by ASC, d.amount_cents DESC, d.id ASC",
+  deadline_desc: "d.respond_by DESC, d.amount_cents DESC, d.id DESC",
+  amount_desc: "d.amount_cents DESC, d.respond_by ASC",
+  amount_asc: "d.amount_cents ASC, d.respond_by ASC",
+  opened_desc: "d.opened_at DESC, d.id DESC",
+  opened_asc: "d.opened_at ASC, d.id ASC",
+} as const;
+export type DisputeSort = keyof typeof DISPUTE_ORDER;
+export const DISPUTE_SORTS = Object.keys(DISPUTE_ORDER) as DisputeSort[];
+
+/** Search by cardholder, merchant ref, reason code, card last 4 or dispute id; optionally filter by status and sort (default: soonest deadline first). */
+export function listDisputes(q = "", opts: { status?: DisputeStatus; sort?: DisputeSort } = {}): Dispute[] {
+  const term = q.trim();
+  const order = DISPUTE_ORDER[opts.sort ?? "deadline_asc"] ?? DISPUTE_ORDER.deadline_asc;
+  const where = [
+    ...(opts.status ? ["d.status = :status"] : []),
+    ...(term
+      ? [`(d.cardholder_name LIKE :like ESCAPE '\\' OR d.merchant_ref LIKE :like ESCAPE '\\' OR d.reason_code LIKE :like ESCAPE '\\'
+          OR d.card_last4 = :term OR CAST(d.id AS TEXT) = :term)`]
+      : []),
+  ];
+  const params = {
+    ...(opts.status ? { status: opts.status } : {}),
+    ...(term ? { like: `%${term.replace(/[\\%_]/g, "\\$&")}%`, term } : {}),
+  };
+  const rows = db()
+    .prepare(`${SELECT} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${order}`)
+    .all(params) as (Row & { evidence_count: number })[];
   return rows.map(toDispute);
 }
 
@@ -73,11 +98,6 @@ export function listEvidence(disputeId: number): Evidence[] {
        FROM chargebacks_evidence e LEFT JOIN users u ON u.id = e.author_id WHERE e.dispute_id = ? ORDER BY e.id`,
     )
     .all(disputeId) as Evidence[];
-}
-
-export function countByStatus(): Record<DisputeStatus, number> {
-  const rows = db().prepare("SELECT status, COUNT(*) AS n FROM chargebacks_disputes GROUP BY status").all() as { status: DisputeStatus; n: number }[];
-  return Object.fromEntries(STATUSES.map((s) => [s, rows.find((r) => r.status === s)?.n ?? 0])) as Record<DisputeStatus, number>;
 }
 
 /** Raw row for use inside actions only. Never return this to a page. */
