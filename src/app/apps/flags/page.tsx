@@ -1,34 +1,66 @@
+import Link from "next/link";
 import { requireAccess } from "@/platform/guard";
 import { can } from "@/platform/rbac";
 import { ActionForm } from "@/platform/ui/ActionForm";
-import { Badge, Card, DataTable, PageHeader, Stat, Tabs } from "@/platform/ui/primitives";
+import { Badge, Card, DataTable, PageHeader, Stat } from "@/platform/ui/primitives";
 import { createFlag } from "./_app/actions";
 import { manifest } from "./_app/manifest";
 import { ENVS, listFlags, type Flag } from "./_app/queries";
 import { ENV_LABEL, stateLabel, stateTone } from "./_app/tones";
 
-const VIEWS = { all: "All flags", live: "On in prod", off: "Off in prod" } as const;
-type View = keyof typeof VIEWS;
-const SORTS = { key: "Key (A–Z)", updated: "Recently changed", created: "Newest first", rollout: "Prod rollout (high–low)" } as const;
-type Sort = keyof typeof SORTS;
+type Param = string | string[] | undefined;
+const first = (v: Param) => (Array.isArray(v) ? v[0] : v);
 
-const lastChange = (f: Flag) => ENVS.map((e) => f.states[e].updatedAt).sort().at(-1) ?? "";
-const SORTERS: Record<Sort, (a: Flag, b: Flag) => number> = {
-  key: (a, b) => a.key.localeCompare(b.key),
-  updated: (a, b) => lastChange(b).localeCompare(lastChange(a)),
-  created: (a, b) => b.createdAt.localeCompare(a.createdAt),
-  rollout: (a, b) => b.states.prod.rollout - a.states.prod.rollout || a.key.localeCompare(b.key),
+const STATUSES = { live: "On in prod", off: "Off in prod", partial: "Partial prod rollout", staging: "Staging only" } as const;
+type Status = keyof typeof STATUSES;
+const STATUS_FILTER: Record<Status, (f: Flag) => boolean> = {
+  live: (f) => f.liveInProd,
+  off: (f) => !f.liveInProd,
+  partial: (f) => f.liveInProd && f.states.prod.rollout < 100,
+  staging: (f) => f.states.staging.enabled && !f.liveInProd,
 };
 
-export default async function FlagsPage({ searchParams }: { searchParams: Promise<{ view?: string; sort?: string }> }) {
+const SORTS = {
+  key_asc: "Key: A to Z",
+  key_desc: "Key: Z to A",
+  changed_desc: "Changed: newest first",
+  changed_asc: "Changed: oldest first",
+  created_desc: "Created: newest first",
+  created_asc: "Created: oldest first",
+  rollout_desc: "Prod rollout: high to low",
+  rollout_asc: "Prod rollout: low to high",
+} as const;
+type Sort = keyof typeof SORTS;
+const DEFAULT_SORT: Sort = "key_asc";
+
+const lastChange = (f: Flag) => ENVS.map((e) => f.states[e].updatedAt).sort().at(-1) ?? "";
+const byKey = (a: Flag, b: Flag) => a.key.localeCompare(b.key);
+const SORTERS: Record<Sort, (a: Flag, b: Flag) => number> = {
+  key_asc: byKey,
+  key_desc: (a, b) => byKey(b, a),
+  changed_desc: (a, b) => lastChange(b).localeCompare(lastChange(a)) || byKey(a, b),
+  changed_asc: (a, b) => lastChange(a).localeCompare(lastChange(b)) || byKey(a, b),
+  created_desc: (a, b) => b.createdAt.localeCompare(a.createdAt) || byKey(a, b),
+  created_asc: (a, b) => a.createdAt.localeCompare(b.createdAt) || byKey(a, b),
+  rollout_desc: (a, b) => b.states.prod.rollout - a.states.prod.rollout || byKey(a, b),
+  rollout_asc: (a, b) => a.states.prod.rollout - b.states.prod.rollout || byKey(a, b),
+};
+const SELECT_CLASS = "rounded border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none";
+
+export default async function FlagsPage({ searchParams }: { searchParams: Promise<{ q?: Param; status?: Param; sort?: Param }> }) {
   const user = await requireAccess(manifest.readPermission);
-  const { view: rawView, sort: rawSort } = await searchParams;
-  const view: View = rawView && Object.hasOwn(VIEWS, rawView) ? (rawView as View) : "all";
-  const sort: Sort = rawSort && Object.hasOwn(SORTS, rawSort) ? (rawSort as Sort) : "key";
+  const params = await searchParams;
+  const [q = "", rawStatus, rawSort] = [first(params.q), first(params.status), first(params.sort)];
+  const status = rawStatus && Object.hasOwn(STATUSES, rawStatus) ? (rawStatus as Status) : undefined;
+  const sort: Sort = rawSort && Object.hasOwn(SORTS, rawSort) ? (rawSort as Sort) : DEFAULT_SORT;
+  const filtered = Boolean(q || status || sort !== DEFAULT_SORT);
   const all = listFlags();
-  const live = all.filter((f) => f.liveInProd);
-  const rows = (view === "live" ? live : view === "off" ? all.filter((f) => !f.liveInProd) : [...all]).sort(SORTERS[sort]);
-  const counts: Record<View, number> = { all: all.length, live: live.length, off: all.length - live.length };
+  const live = all.filter(STATUS_FILTER.live);
+  const needle = q.trim().toLowerCase();
+  const rows = all
+    .filter((f) => !status || STATUS_FILTER[status](f))
+    .filter((f) => !needle || [f.key, f.owner, f.description].some((t) => t.toLowerCase().includes(needle)))
+    .sort(SORTERS[sort]);
 
   return (
     <>
@@ -36,26 +68,29 @@ export default async function FlagsPage({ searchParams }: { searchParams: Promis
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Flags" value={all.length} />
         <Stat label="On in prod" value={live.length} tone="red" />
-        <Stat label="Partial prod rollout" value={live.filter((f) => f.states.prod.rollout < 100).length} tone="yellow" />
-        <Stat label="Staging only" value={all.filter((f) => f.states.staging.enabled && !f.liveInProd).length} tone="blue" />
+        <Stat label="Partial prod rollout" value={all.filter(STATUS_FILTER.partial).length} tone="yellow" />
+        <Stat label="Staging only" value={all.filter(STATUS_FILTER.staging).length} tone="blue" />
       </div>
       <div className="grid gap-6 xl:grid-cols-[1fr_20rem]">
         <div>
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <Tabs active={view} tabs={(Object.keys(VIEWS) as View[]).map((k) => ({ key: k, label: VIEWS[k], href: `/apps/flags?view=${k}&sort=${sort}`, count: counts[k] }))} />
-            <form key={`${view}-${sort}`} method="get" className="mb-3 flex items-center gap-2 text-sm">
-              <input type="hidden" name="view" value={view} />
-              <label htmlFor="sort" className="text-slate-600">Sort</label>
-              <select id="sort" name="sort" defaultValue={sort} className="rounded border border-slate-300 px-2 py-1">
-                {(Object.keys(SORTS) as Sort[]).map((k) => <option key={k} value={k}>{SORTS[k]}</option>)}
-              </select>
-              <button type="submit" className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50">Apply</button>
-            </form>
-          </div>
+          {/* Keyed so the uncontrolled inputs reset to the URL's values on client navigation (e.g. Clear). */}
+          <form key={`${q}|${status ?? ""}|${sort}`} action="/apps/flags" className="mb-4 flex flex-wrap gap-2">
+            <input name="q" defaultValue={q} placeholder="Search key, owner or description"
+              className="w-full max-w-md rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none" />
+            <select name="status" defaultValue={status ?? ""} aria-label="Flag status" className={SELECT_CLASS}>
+              <option value="">All statuses</option>
+              {(Object.keys(STATUSES) as Status[]).map((s) => <option key={s} value={s}>{STATUSES[s]}</option>)}
+            </select>
+            <select name="sort" defaultValue={sort} aria-label="Sort by" className={SELECT_CLASS}>
+              {(Object.keys(SORTS) as Sort[]).map((s) => <option key={s} value={s}>{SORTS[s]}</option>)}
+            </select>
+            <button className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Apply</button>
+            {filtered && <Link href="/apps/flags" className="self-center text-sm text-blue-700 hover:underline">Clear</Link>}
+          </form>
           <DataTable<Flag>
             rows={rows}
             rowHref={(f) => `/apps/flags/${f.id}`}
-            empty="No flags match."
+            empty={q || status ? "No flags match these filters." : "No flags."}
             columns={[
               {
                 header: "Flag",
