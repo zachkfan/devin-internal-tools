@@ -1,0 +1,8 @@
+# The platform (auth, RBAC, audit, approvals) and its guardrails need platform-owner review.
+# App folders under src/app/apps/ can be reviewed by the owning team.
+/src/platform/            @zachkfan
+/tests/guardrails.test.ts @zachkfan
+/tests/platform.test.ts   @zachkfan
+/.agents/                 @zachkfan
+/AGENTS.md                @zachkfan
+/.github/                 @zachkfan
