@@ -111,7 +111,10 @@ describe("evidence -> accept / contest", () => {
     const contested = first("d.status = 'contested'");
     expect(contestDispute.invoke(u("omar"), { disputeId: accepted }, "changed mind")?.message).toMatch(/already accepted/);
     expect(acceptDispute.invoke(u("omar"), { disputeId: contested }, "changed mind")?.message).toMatch(/already contested/);
-    expect(addEvidence.invoke(u("sam"), { disputeId: accepted, note: "late evidence that should be rejected" })?.ok).toBe(false);
+    const auditCount = listAudit({ limit: 1000 }).length;
+    expect(addEvidence.invoke(u("sam"), { disputeId: accepted, note: "late evidence for cardholder ORD-9876" })).toMatchObject({ ok: false, message: expect.stringMatching(/only be added to open disputes/) });
+    expect(listAudit({ limit: 1000 }).map((e) => JSON.stringify(e)).join("\n")).not.toContain("ORD-9876");
+    expect(listAudit({ limit: 1000 })).toHaveLength(auditCount);
     expect(status(accepted)).toBe("accepted");
     expect(status(contested)).toBe("contested");
   });
@@ -163,6 +166,16 @@ describe("contest approvals (over $1,000 needs an Ops Manager)", () => {
     expect(decide(u("omar"), req.id, "approve", "self")?.message).toMatch(/four-eyes/);
     expect(decide(u("priya"), req.id, "reject", "accept instead")?.ok).toBe(true);
     expect(status(id)).toBe("open");
+  });
+
+  it("won't queue a second contest while one is waiting for approval", () => {
+    const id = withEvidence(first(`d.status = 'open' AND d.amount_cents > 100000 AND d.respond_by >= date('now')`));
+    expect(contestDispute.invoke(u("sam"), { disputeId: id }, "contest it")?.message).toMatch(/second approver/);
+    expect(contestDispute.invoke(u("priya"), { disputeId: id }, "contest it again")).toMatchObject({ ok: false, message: expect.stringMatching(/already waiting for approval/) });
+    expect(pendingFor(u("omar"))).toHaveLength(1);
+    const [req] = pendingFor(u("omar"));
+    expect(decide(u("omar"), req.id, "approve", "ok")?.ok).toBe(true);
+    expect(status(id)).toBe("contested");
   });
 
   it("an approved contest fails if the dispute was accepted in the meantime", () => {

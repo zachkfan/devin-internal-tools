@@ -60,8 +60,6 @@ export default async function ChargebackDisputePage({ params }: { params: Promis
             <p className="text-sm text-slate-500">Read-only: you can view this dispute but not decide it.</p>
           ) : !open ? (
             <p className="text-sm text-slate-500">This dispute is closed ({d.status}).</p>
-          ) : pendingRequest ? (
-            <p className="text-sm text-amber-700">A contest request is waiting for a second approver.</p>
           ) : evidence.length === 0 ? (
             <p className="text-sm text-amber-700">Add a written evidence note before accepting or contesting.</p>
           ) : (
@@ -75,7 +73,9 @@ export default async function ChargebackDisputePage({ params }: { params: Promis
               {canContest && (
                 <div className="border-t border-slate-100 pt-4">
                   <p className="mb-2 text-xs text-slate-500">Contest: submit our evidence to {NETWORK_LABEL[d.network]}.</p>
-                  {d.daysLeft < 0 ? (
+                  {pendingRequest ? (
+                    <p className="text-sm text-amber-700">A contest request is waiting for a second approver. You can still accept instead; the pending contest will then fail.</p>
+                  ) : d.daysLeft < 0 ? (
                     <p className="text-sm text-red-700">The respond-by date has passed; this dispute can no longer be contested.</p>
                   ) : (
                     <ActionForm action={contestDispute} hidden={{ disputeId: d.id }} submits={[{ label: "Contest" }]} />

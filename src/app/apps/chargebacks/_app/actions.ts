@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { ActionError, defineAction } from "@/platform/action";
+import { approvalsForTarget } from "@/platform/approvals";
 import { db } from "@/platform/db";
 import { fmtMoney } from "@/platform/ui/primitives";
 import { NETWORK_LABEL, REASON_LABEL, daysLeft, evidenceCount, getDisputeRow, needsContestApproval } from "./queries";
@@ -28,7 +29,14 @@ export const addEvidence = defineAction({
   name: "add_evidence",
   permission: "chargebacks:add_evidence",
   requireReason: false,
-  input: z.object({ disputeId, note: z.string().trim().min(10, "Evidence note must be at least 10 characters.").max(4000) }),
+  // Check the dispute during validation: failures there aren't audited, while run() errors audit the full input (incl. note text).
+  input: z
+    .object({ disputeId, note: z.string().trim().min(10, "Evidence note must be at least 10 characters.").max(4000) })
+    .superRefine(({ disputeId }, issue) => {
+      const d = getDisputeRow(disputeId);
+      if (!d) issue.addIssue({ code: "custom", path: ["disputeId"], message: `Dispute #${disputeId} not found.` });
+      else if (d.status !== "open") issue.addIssue({ code: "custom", path: ["disputeId"], message: `Dispute #${disputeId} is ${d.status}; evidence can only be added to open disputes.` });
+    }),
   target: (i) => `chargeback:${i.disputeId}`,
   run: ({ disputeId, note }, ctx) => {
     const d = getDisputeRow(disputeId);
@@ -66,7 +74,13 @@ export const contestDispute = defineAction({
   target: (i) => `chargeback:${i.disputeId}`,
   approval: {
     // Validate before queueing so the inbox never holds a request that can't execute; run() re-checks at approval time.
-    required: ({ disputeId }) => needsContestApproval(loadContestableDispute(disputeId).amount_cents),
+    required: ({ disputeId }) => {
+      const d = loadContestableDispute(disputeId);
+      if (approvalsForTarget(`chargeback:${disputeId}`).some((r) => r.action === "contest_dispute" && r.status === "pending")) {
+        throw new ActionError(`A contest request for dispute #${disputeId} is already waiting for approval.`);
+      }
+      return needsContestApproval(d.amount_cents);
+    },
     approverPermission: "chargebacks:approve_contest",
     summary: ({ disputeId }) => {
       const d = getDisputeRow(disputeId);
