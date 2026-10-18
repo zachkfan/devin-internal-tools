@@ -1,9 +1,10 @@
 import * as kyc from "@/app/apps/kyc/_app/actions";
+import * as refunds from "@/app/apps/refunds/_app/actions";
 import { isPlatformAction, type PlatformAction } from "./action";
 
 // Every app's actions module, keyed by app id. Needed so approved requests can be executed later.
 // tests/guardrails.test.ts fails if an app is missing here.
-export const actionModules: Record<string, Record<string, unknown>> = { kyc };
+export const actionModules: Record<string, Record<string, unknown>> = { kyc, refunds };
 
 export function allActions(): PlatformAction[] {
   return Object.values(actionModules).flatMap((m) => Object.values(m).filter(isPlatformAction));
