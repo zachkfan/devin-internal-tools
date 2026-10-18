@@ -10,7 +10,8 @@ import { getTransactionRow, txnTarget } from "./queries";
 const toCents = (dollars: number) => Math.round(dollars * 100);
 
 const amount = z.coerce.number().positive("Amount must be greater than zero.")
-  .refine((d) => Math.abs(d * 100 - toCents(d)) < 1e-6, "Amount can have at most 2 decimal places.");
+  .refine((d) => Math.abs(d * 100 - toCents(d)) < 1e-6, "Amount can have at most 2 decimal places.")
+  .refine((d) => toCents(d) >= 1 && Number.isSafeInteger(toCents(d)), "Amount must be at least $0.01.");
 
 /** Loads the transaction and enforces that total refunds never exceed the captured amount. */
 function checkRefundable(transactionId: number, cents: number) {

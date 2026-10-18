@@ -61,8 +61,9 @@ export function listTransactions(q = ""): Transaction[] {
   const term = q.trim();
   const rows = term
     ? db().prepare(`${TXN_SELECT}
-        WHERE t.customer_name LIKE :like OR t.merchant_descriptor LIKE :like OR t.card_last4 = :term OR CAST(t.id AS TEXT) = :term
-        ORDER BY t.captured_at DESC`).all({ like: `%${term}%`, term })
+        WHERE t.customer_name LIKE :like ESCAPE '\\' OR t.merchant_descriptor LIKE :like ESCAPE '\\'
+          OR t.card_last4 = :term OR CAST(t.id AS TEXT) = :term
+        ORDER BY t.captured_at DESC`).all({ like: `%${term.replace(/[\\%_]/g, "\\$&")}%`, term })
     : db().prepare(`${TXN_SELECT} ORDER BY t.captured_at DESC`).all();
   return (rows as TxnRow[]).map(toTxn);
 }

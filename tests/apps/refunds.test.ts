@@ -74,6 +74,7 @@ describe("issuing refunds", () => {
       { transactionId: TXN.small, amount: 0, reasonCode: "goodwill" },
       { transactionId: TXN.small, amount: -5, reasonCode: "goodwill" },
       { transactionId: TXN.small, amount: 1.234, reasonCode: "goodwill" },
+      { transactionId: TXN.small, amount: 0.000000001, reasonCode: "goodwill" },
       { transactionId: TXN.small, amount: "abc", reasonCode: "goodwill" },
       { transactionId: TXN.small, amount: 5, reasonCode: "because" },
     ]) expect(issueRefund.invoke(u("sam"), input, "x")?.ok).toBe(false);
@@ -176,6 +177,8 @@ describe("queries", () => {
     expect(listTransactions("4242").map((t) => t.id)).toEqual([1]);
     expect(listTransactions("3").map((t) => t.id)).toEqual([3]);
     expect(listTransactions("no such thing")).toEqual([]);
+    expect(listTransactions("%")).toEqual([]);
+    expect(listTransactions("_")).toEqual([]);
   });
 
   it("computes headline stats", () => {
