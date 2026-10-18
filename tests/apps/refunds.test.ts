@@ -181,6 +181,31 @@ describe("queries", () => {
     expect(listTransactions("_")).toEqual([]);
   });
 
+  it("sorts transactions by date, amount and remaining", () => {
+    const isSorted = (xs: (number | string)[], dir: 1 | -1) => xs.every((x, i) => i === 0 || (xs[i - 1] < x ? 1 : xs[i - 1] > x ? -1 : 0) * dir >= 0);
+    expect(isSorted(listTransactions().map((t) => t.capturedAt), -1)).toBe(true);
+    expect(isSorted(listTransactions("", { sort: "date_asc" }).map((t) => t.capturedAt), 1)).toBe(true);
+    expect(listTransactions("", { sort: "amount_desc" })[0].amountCents).toBe(480_000);
+    expect(isSorted(listTransactions("", { sort: "amount_desc" }).map((t) => t.amountCents), -1)).toBe(true);
+    expect(listTransactions("", { sort: "amount_asc" })[0].amountCents).toBe(1_250);
+    expect(isSorted(listTransactions("", { sort: "amount_asc" }).map((t) => t.amountCents), 1)).toBe(true);
+    expect(isSorted(listTransactions("", { sort: "remaining_desc" }).map((t) => t.remainingCents), -1)).toBe(true);
+    expect(isSorted(listTransactions("", { sort: "remaining_asc" }).map((t) => t.remainingCents), 1)).toBe(true);
+    expect(listTransactions("", { sort: "bogus" as never })).toHaveLength(15);
+  });
+
+  it("filters transactions by refund status", () => {
+    const all = listTransactions();
+    for (const state of ["none", "partial", "full"] as const) {
+      const rows = listTransactions("", { state });
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((t) => t.refundState === state)).toBe(true);
+      expect(rows.length).toBe(all.filter((t) => t.refundState === state).length);
+    }
+    expect(listTransactions("", { state: "full" }).map((t) => t.id)).toContain(TXN.fullyRefunded);
+    expect(listTransactions("thompson", { state: "full" })).toEqual([]);
+  });
+
   it("computes headline stats", () => {
     const before = refundStats();
     expect(before.refundRate).toBeCloseTo(before.refundedCents / before.capturedCents);

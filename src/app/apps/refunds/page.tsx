@@ -2,16 +2,31 @@ import Link from "next/link";
 import { requireAccess } from "@/platform/guard";
 import { Badge, DataTable, PageHeader, Stat, Tabs, fmtMoney, fmtTime } from "@/platform/ui/primitives";
 import { manifest } from "./_app/manifest";
-import { listPendingRefunds, listRefunds, listTransactions, refundStats } from "./_app/queries";
+import {
+  listPendingRefunds, listRefunds, listTransactions, refundStats, REFUND_STATES, TXN_SORTS, type RefundState, type TxnSort,
+} from "./_app/queries";
 import { REFUND_STATE_LABEL, REFUND_STATE_TONE } from "./_app/tones";
 
 const TABS = ["transactions", "history", "pending"] as const;
 type Tab = (typeof TABS)[number];
 
-export default async function RefundsDashboardPage({ searchParams }: { searchParams: Promise<{ tab?: string; q?: string }> }) {
+const SORT_LABEL: Record<TxnSort, string> = {
+  date_desc: "Date: newest first",
+  date_asc: "Date: oldest first",
+  amount_desc: "Amount: high to low",
+  amount_asc: "Amount: low to high",
+  remaining_desc: "Remaining: high to low",
+  remaining_asc: "Remaining: low to high",
+};
+const SELECT_CLASS = "rounded border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none";
+
+export default async function RefundsDashboardPage({ searchParams }: { searchParams: Promise<{ tab?: string; q?: string; status?: string; sort?: string }> }) {
   await requireAccess(manifest.readPermission);
-  const { tab: rawTab, q = "" } = await searchParams;
+  const { tab: rawTab, q = "", status: rawStatus, sort: rawSort } = await searchParams;
   const tab: Tab = (TABS as readonly string[]).includes(rawTab ?? "") ? (rawTab as Tab) : "transactions";
+  const state = (REFUND_STATES as readonly string[]).includes(rawStatus ?? "") ? (rawStatus as RefundState) : undefined;
+  const sort: TxnSort = (TXN_SORTS as string[]).includes(rawSort ?? "") ? (rawSort as TxnSort) : "date_desc";
+  const filtered = Boolean(q || state || sort !== "date_desc");
   const stats = refundStats();
   const refunds = listRefunds();
   const pending = listPendingRefunds();
@@ -33,16 +48,23 @@ export default async function RefundsDashboardPage({ searchParams }: { searchPar
 
       {tab === "transactions" && (
         <>
-          <form action="/apps/refunds" className="mb-4 flex gap-2">
+          <form action="/apps/refunds" className="mb-4 flex flex-wrap gap-2">
             <input name="q" defaultValue={q} placeholder="Search customer, merchant, card last 4 or transaction #"
               className="w-full max-w-md rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none" />
-            <button className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Search</button>
-            {q && <Link href="/apps/refunds" className="self-center text-sm text-blue-700 hover:underline">Clear</Link>}
+            <select name="status" defaultValue={state ?? ""} aria-label="Refund status" className={SELECT_CLASS}>
+              <option value="">All statuses</option>
+              {REFUND_STATES.map((s) => <option key={s} value={s}>{REFUND_STATE_LABEL[s]}</option>)}
+            </select>
+            <select name="sort" defaultValue={sort} aria-label="Sort by" className={SELECT_CLASS}>
+              {TXN_SORTS.map((s) => <option key={s} value={s}>{SORT_LABEL[s]}</option>)}
+            </select>
+            <button className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Apply</button>
+            {filtered && <Link href="/apps/refunds" className="self-center text-sm text-blue-700 hover:underline">Clear</Link>}
           </form>
           <DataTable
-            rows={listTransactions(q)}
+            rows={listTransactions(q, { state, sort })}
             rowHref={(t) => `/apps/refunds/${t.id}`}
-            empty={q ? `No transactions match "${q}".` : "No transactions."}
+            empty={q || state ? "No transactions match these filters." : "No transactions."}
             columns={[
               { header: "Txn", cell: (t) => `#${t.id}` },
               { header: "Customer", cell: (t) => t.customerName },

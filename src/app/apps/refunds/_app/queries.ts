@@ -56,16 +56,31 @@ const toRefund = (r: RefundRow): Refund => ({
   issuedBy: r.issued_by, approvedBy: r.approved_by, issuedAt: r.issued_at,
 });
 
-/** Search by customer name, merchant descriptor, card last 4 or transaction id. */
-export function listTransactions(q = ""): Transaction[] {
+export const REFUND_STATES = ["none", "partial", "full"] as const satisfies readonly RefundState[];
+
+const TXN_ORDER = {
+  date_desc: "t.captured_at DESC, t.id DESC",
+  date_asc: "t.captured_at ASC, t.id ASC",
+  amount_desc: "t.amount_cents DESC, t.captured_at DESC",
+  amount_asc: "t.amount_cents ASC, t.captured_at DESC",
+  remaining_desc: "(t.amount_cents - refunded_cents) DESC, t.captured_at DESC",
+  remaining_asc: "(t.amount_cents - refunded_cents) ASC, t.captured_at DESC",
+} as const;
+export type TxnSort = keyof typeof TXN_ORDER;
+export const TXN_SORTS = Object.keys(TXN_ORDER) as TxnSort[];
+
+/** Search by customer name, merchant descriptor, card last 4 or transaction id; optionally filter by refund state and sort. */
+export function listTransactions(q = "", opts: { state?: RefundState; sort?: TxnSort } = {}): Transaction[] {
   const term = q.trim();
+  const order = TXN_ORDER[opts.sort ?? "date_desc"] ?? TXN_ORDER.date_desc;
   const rows = term
     ? db().prepare(`${TXN_SELECT}
         WHERE t.customer_name LIKE :like ESCAPE '\\' OR t.merchant_descriptor LIKE :like ESCAPE '\\'
           OR t.card_last4 = :term OR CAST(t.id AS TEXT) = :term
-        ORDER BY t.captured_at DESC`).all({ like: `%${term.replace(/[\\%_]/g, "\\$&")}%`, term })
-    : db().prepare(`${TXN_SELECT} ORDER BY t.captured_at DESC`).all();
-  return (rows as TxnRow[]).map(toTxn);
+        ORDER BY ${order}`).all({ like: `%${term.replace(/[\\%_]/g, "\\$&")}%`, term })
+    : db().prepare(`${TXN_SELECT} ORDER BY ${order}`).all();
+  const txns = (rows as TxnRow[]).map(toTxn);
+  return opts.state ? txns.filter((t) => t.refundState === opts.state) : txns;
 }
 
 export function getTransaction(id: number): Transaction | null {
