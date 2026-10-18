@@ -23,8 +23,8 @@ const SORTERS: Record<Sort, (a: Flag, b: Flag) => number> = {
 export default async function FlagsPage({ searchParams }: { searchParams: Promise<{ view?: string; sort?: string }> }) {
   const user = await requireAccess(manifest.readPermission);
   const { view: rawView, sort: rawSort } = await searchParams;
-  const view: View = rawView && rawView in VIEWS ? (rawView as View) : "all";
-  const sort: Sort = rawSort && rawSort in SORTS ? (rawSort as Sort) : "key";
+  const view: View = rawView && Object.hasOwn(VIEWS, rawView) ? (rawView as View) : "all";
+  const sort: Sort = rawSort && Object.hasOwn(SORTS, rawSort) ? (rawSort as Sort) : "key";
   const all = listFlags();
   const live = all.filter((f) => f.liveInProd);
   const rows = (view === "live" ? live : view === "off" ? all.filter((f) => !f.liveInProd) : [...all]).sort(SORTERS[sort]);
