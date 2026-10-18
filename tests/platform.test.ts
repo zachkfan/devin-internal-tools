@@ -1,8 +1,10 @@
 // Behavioural tests for the platform primitives, exercised through the KYC reference app.
 import { beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { defineAction } from "@/platform/action";
 import { claimCase, decideCase, revealPii } from "@/app/apps/kyc/_app/actions";
 import { getCase } from "@/app/apps/kyc/_app/queries";
-import { decide, pendingFor } from "@/platform/approvals";
+import { decide, decisionBanner, getRequest, pendingFor } from "@/platform/approvals";
 import { listAudit, verifyAuditChain } from "@/platform/audit";
 import { getUser } from "@/platform/auth";
 import { db, resetDbForTests } from "@/platform/db";
@@ -81,6 +83,26 @@ describe("maker-checker approvals", () => {
   });
 });
 
+describe("approval confirmation banner", () => {
+  it("is derived from stored state and shown only to the decider", () => {
+    const id = firstCase("risk_score >= 70 AND status = 'pending'");
+    decideCase.invoke(u("ana"), { caseId: id, decision: "approve" }, "looks fine");
+    const req = pendingFor(u("omar"))[0];
+    expect(decisionBanner(getRequest(req.id), u("omar"))).toBeNull();
+    decide(u("omar"), req.id, "approve", "checked");
+    expect(decisionBanner(getRequest(req.id), u("omar"))).toMatchObject({ ok: true, message: expect.stringMatching(/^Approved and executed request #\d+: Approve high-risk KYC case/) });
+    expect(decisionBanner(getRequest(req.id), u("priya"))).toBeNull();
+    expect(decisionBanner(getRequest(req.id), u("ana"))).toBeNull();
+  });
+
+  it("reports a rejection", () => {
+    decideCase.invoke(u("ana"), { caseId: firstCase("risk_score >= 70 AND status = 'pending'"), decision: "approve" }, "ok");
+    const req = pendingFor(u("priya"))[0];
+    decide(u("priya"), req.id, "reject", "needs EDD");
+    expect(decisionBanner(getRequest(req.id), u("priya"))).toMatchObject({ ok: true, message: expect.stringMatching(/^Rejected request/) });
+  });
+});
+
 describe("PII", () => {
   it("is masked by default and every reveal is audited", () => {
     const id = firstCase("1=1");
@@ -91,6 +113,28 @@ describe("PII", () => {
     expect(res?.data).toEqual({ value: raw });
     expect(lastAudit()).toMatchObject({ actorId: "ana", action: "reveal_pii", outcome: "success", reason: "verifying ID document" });
     expect(lastAudit().details).not.toContain(raw);
+  });
+});
+
+describe("audit redaction", () => {
+  const SECRET = "Jane Roe called from 555-0100";
+  const noteAction = (run: () => string) => defineAction({
+    app: "kyc", name: "test_note", permission: "kyc:decide", requireReason: false, redact: ["note"],
+    input: z.object({ caseId: z.coerce.number(), note: z.string() }), run,
+  });
+
+  it("keeps redacted fields out of success entries", () => {
+    expect(noteAction(() => "ok").invoke(u("ana"), { caseId: 1, note: SECRET })?.ok).toBe(true);
+    expect(lastAudit()).toMatchObject({ outcome: "success" });
+    expect(lastAudit().details).not.toContain(SECRET);
+    expect(lastAudit().details).toContain("[redacted]");
+  });
+
+  it("keeps redacted fields out of unexpected-error entries", () => {
+    const res = noteAction(() => { throw new Error("db down"); }).invoke(u("ana"), { caseId: 1, note: SECRET });
+    expect(res).toMatchObject({ ok: false, message: "Unexpected error (logged)." });
+    expect(lastAudit()).toMatchObject({ outcome: "error" });
+    expect(lastAudit().details).not.toContain(SECRET);
   });
 });
 

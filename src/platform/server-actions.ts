@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "./action";
-import { decide } from "./approvals";
+import { decide, getRequest } from "./approvals";
 import { writeAudit } from "./audit";
 import { currentUser, devLoginAllowed, getUser, requireUser, SESSION_COOKIE, signSession } from "./auth";
 
@@ -29,7 +29,12 @@ export async function logout() {
 export async function decideApproval(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const user = await requireUser();
   const decision = formData.get("decision") === "approve" ? "approve" : "reject";
-  const state = decide(user, Number(formData.get("requestId")), decision, String(formData.get("reason") ?? ""));
-  if (state?.ok) revalidatePath("/", "layout");
+  const requestId = Number(formData.get("requestId"));
+  const state = decide(user, requestId, decision, String(formData.get("reason") ?? ""));
+  const req = getRequest(requestId);
+  if (req && req.status !== "pending" && req.decided_by === user.id) {
+    revalidatePath("/", "layout");
+    redirect(`/approvals?decided=${req.id}`);
+  }
   return { ...state!, at: Date.now() };
 }

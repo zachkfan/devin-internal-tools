@@ -29,7 +29,8 @@ export const addEvidence = defineAction({
   name: "add_evidence",
   permission: "chargebacks:add_evidence",
   requireReason: false,
-  // Check the dispute during validation: failures there aren't audited, while run() errors audit the full input (incl. note text).
+  redact: ["note"],
+  // Check the dispute during validation so closed/missing disputes are rejected before run(); `redact` keeps the note text out of every audit entry.
   input: z
     .object({ disputeId, note: z.string().trim().min(10, "Evidence note must be at least 10 characters.").max(4000) })
     .superRefine(({ disputeId }, issue) => {
