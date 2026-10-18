@@ -29,6 +29,7 @@ export const manifest = defineApp({
       env TEXT NOT NULL CHECK (env IN ('dev','staging','prod')),
       enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
       rollout INTEGER NOT NULL DEFAULT 0 CHECK (rollout BETWEEN 0 AND 100),
+      version INTEGER NOT NULL DEFAULT 0,
       updated_by TEXT REFERENCES users(id),
       updated_at TEXT NOT NULL,
       PRIMARY KEY (flag_id, env),

@@ -4,7 +4,7 @@ import { ENVS, type Env } from "./manifest";
 export { ENVS, type Env };
 
 /** What pages get. Flags hold no PII (owners are team handles), so nothing is masked. */
-export type EnvState = { enabled: boolean; rollout: number; updatedBy: string | null; updatedAt: string };
+export type EnvState = { enabled: boolean; rollout: number; version: number; updatedBy: string | null; updatedAt: string };
 export type Flag = {
   id: number; key: string; description: string; owner: string; createdBy: string; createdAt: string;
   states: Record<Env, EnvState>;
@@ -12,9 +12,9 @@ export type Flag = {
 };
 
 export type FlagRow = { id: number; key: string; description: string; owner: string; created_by: string; created_at: string };
-export type StateRow = { flag_id: number; env: Env; enabled: 0 | 1; rollout: number; updated_by: string | null; updated_at: string };
+export type StateRow = { flag_id: number; env: Env; enabled: 0 | 1; rollout: number; version: number; updated_by: string | null; updated_at: string };
 
-const toState = (s: StateRow): EnvState => ({ enabled: s.enabled === 1, rollout: s.rollout, updatedBy: s.updated_by, updatedAt: s.updated_at });
+const toState = (s: StateRow): EnvState => ({ enabled: s.enabled === 1, rollout: s.rollout, version: s.version, updatedBy: s.updated_by, updatedAt: s.updated_at });
 
 function toFlag(r: FlagRow, states: StateRow[]): Flag {
   const byEnv = Object.fromEntries(

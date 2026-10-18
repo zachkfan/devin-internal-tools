@@ -17,7 +17,7 @@ const lastAudit = () => listAudit({ limit: 1 })[0];
 /** Builds set_flag_state input against the flag's current state, like the detail page form does. */
 const change = (key: string, env: Env, enabled: "on" | "off", rollout: number) => {
   const f = byKey(key);
-  return { flagId: f.id, env, enabled, rollout, fromEnabled: f.states[env].enabled ? "on" : "off", fromRollout: f.states[env].rollout };
+  return { flagId: f.id, env, enabled, rollout, fromEnabled: f.states[env].enabled ? "on" : "off", fromRollout: f.states[env].rollout, fromVersion: f.states[env].version };
 };
 
 beforeEach(() => resetDbForTests());
@@ -146,6 +146,29 @@ describe("prod changes need an eng lead (maker-checker)", () => {
     const res = decide(u("lee"), req.id, "approve", "ok");
     expect(res).toMatchObject({ ok: false, message: expect.stringMatching(/changed in prod since/) });
     expect(state("new_onboarding_flow", "prod")).toEqual({ enabled: false, rollout: 0 });
+  });
+
+  it("an old request can't be approved even after prod returns to the values it was made against", () => {
+    const id = byKey("new_onboarding_flow").id;
+    setFlagState.invoke(u("erin"), change("new_onboarding_flow", "prod", "on", 100), "full launch");
+    const [old] = pendingFor(u("lee"));
+    killSwitch.invoke(u("erin"), { flagId: id }, "INC-1234 signup errors");
+    setFlagState.invoke(u("erin"), change("new_onboarding_flow", "prod", "on", 25), "restore 25% after fix");
+    const [restore] = pendingFor(u("lee")).filter((r) => r.id !== old.id);
+    expect(decide(u("lee"), restore.id, "approve", "fix verified")?.ok).toBe(true);
+    expect(state("new_onboarding_flow", "prod")).toEqual({ enabled: true, rollout: 25 });
+
+    expect(decide(u("lee"), old.id, "approve", "ok")).toMatchObject({ ok: false, message: expect.stringMatching(/changed in prod since/) });
+    expect(state("new_onboarding_flow", "prod")).toEqual({ enabled: true, rollout: 25 });
+  });
+
+  it("no-op and stale prod changes are rejected up front instead of reaching the inbox", () => {
+    expect(setFlagState.invoke(u("erin"), change("new_onboarding_flow", "prod", "on", 25), "noop")).toMatchObject({ ok: false, message: expect.stringMatching(/already on @ 25%/) });
+    const stale = change("new_onboarding_flow", "prod", "on", 50);
+    killSwitch.invoke(u("erin"), { flagId: byKey("new_onboarding_flow").id }, "INC-1 errors");
+    expect(setFlagState.invoke(u("erin"), stale, "ramp")).toMatchObject({ ok: false, message: expect.stringMatching(/changed in prod since/) });
+    expect(pendingFor(u("lee"))).toHaveLength(0);
+    expect(lastAudit()).toMatchObject({ outcome: "error" });
   });
 });
 

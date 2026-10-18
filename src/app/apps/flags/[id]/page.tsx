@@ -63,7 +63,7 @@ export default async function FlagPage({ params }: { params: Promise<{ id: strin
                 <>
                   <ActionForm
                     action={setFlagState}
-                    hidden={{ flagId: f.id, env, fromEnabled: s.enabled ? "on" : "off", fromRollout: s.rollout }}
+                    hidden={{ flagId: f.id, env, fromEnabled: s.enabled ? "on" : "off", fromRollout: s.rollout, fromVersion: s.version }}
                     fields={[
                       { name: "enabled", label: "Enabled", type: "select", defaultValue: s.enabled ? "on" : "off", options: [{ value: "on", label: "On" }, { value: "off", label: "Off" }] },
                       { name: "rollout", label: "Rollout % (0-100; off forces 0)", type: "number", defaultValue: String(s.rollout) },

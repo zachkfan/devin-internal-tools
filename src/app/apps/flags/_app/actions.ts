@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { ActionError, defineAction } from "@/platform/action";
 import { db } from "@/platform/db";
-import { ENVS } from "./manifest";
+import { ENVS, type Env } from "./manifest";
 import { getFlagByKey, getFlagRow, getStateRow } from "./queries";
 
 const flagId = z.coerce.number().int().positive();
@@ -41,6 +41,21 @@ export const createFlag = defineAction({
   },
 });
 
+type StateChange = { flagId: number; env: Env; enabled: "on" | "off"; rollout: number; fromVersion: number };
+
+function checkChange(i: StateChange) {
+  const f = loadFlag(i.flagId);
+  const cur = getStateRow(i.flagId, i.env);
+  if (!cur) throw new ActionError(`Flag ${f.key} has no ${i.env} state.`);
+  const enabled = i.enabled === "on";
+  const pct = enabled ? i.rollout : 0;
+  if (cur.version !== i.fromVersion) {
+    throw new ActionError(`${f.key} changed in ${i.env} since this was submitted (now ${fmt(cur.enabled === 1, cur.rollout)}). Re-submit against the current state.`);
+  }
+  if (cur.enabled === (enabled ? 1 : 0) && cur.rollout === pct) throw new ActionError(`${f.key} is already ${fmt(enabled, pct)} in ${i.env}.`);
+  return { f, cur, enabled, pct };
+}
+
 export const setFlagState = defineAction({
   app: "flags",
   name: "set_flag_state",
@@ -50,29 +65,28 @@ export const setFlagState = defineAction({
     env: z.enum(ENVS),
     enabled: onOff,
     rollout,
-    // The state the user saw when submitting. If it changed before this runs (e.g. kill switch fired while a
-    // prod request waited for approval), the change is refused instead of silently overwriting it.
+    // The state the user saw when submitting. `fromVersion` bumps on every write, so a change made against an
+    // older view (e.g. a prod request that waited while the kill switch fired) is refused, even if the
+    // values have since returned to what the user saw.
     fromEnabled: onOff,
     fromRollout: rollout,
+    fromVersion: z.coerce.number().int().min(0),
   }),
   target: (i) => `flags_flag:${i.flagId}`,
   approval: {
-    required: ({ env }) => env === "prod",
+    // Validate before queueing so approvers never see a no-op or already-stale request; run() re-checks on approval.
+    required: (i) => {
+      if (i.env !== "prod") return false;
+      checkChange(i);
+      return true;
+    },
     approverPermission: "flags:approve_prod",
     summary: ({ flagId, enabled, rollout, fromEnabled, fromRollout }) =>
       `Prod change for flag ${getFlagRow(flagId)?.key ?? `#${flagId}`}: ${fmt(fromEnabled === "on", fromRollout)} → ${fmt(enabled === "on", enabled === "on" ? rollout : 0)}`,
   },
   run: (i, ctx) => {
-    const f = loadFlag(i.flagId);
-    const cur = getStateRow(i.flagId, i.env);
-    if (!cur) throw new ActionError(`Flag ${f.key} has no ${i.env} state.`);
-    const enabled = i.enabled === "on";
-    const pct = enabled ? i.rollout : 0;
-    if (cur.enabled !== (i.fromEnabled === "on" ? 1 : 0) || cur.rollout !== i.fromRollout) {
-      throw new ActionError(`${f.key} changed in ${i.env} since this was submitted (now ${fmt(cur.enabled === 1, cur.rollout)}). Re-submit against the current state.`);
-    }
-    if (cur.enabled === (enabled ? 1 : 0) && cur.rollout === pct) throw new ActionError(`${f.key} is already ${fmt(enabled, pct)} in ${i.env}.`);
-    db().prepare("UPDATE flags_states SET enabled = ?, rollout = ?, updated_by = ?, updated_at = ? WHERE flag_id = ? AND env = ?")
+    const { f, cur, enabled, pct } = checkChange(i);
+    db().prepare("UPDATE flags_states SET enabled = ?, rollout = ?, version = version + 1, updated_by = ?, updated_at = ? WHERE flag_id = ? AND env = ?")
       .run(enabled ? 1 : 0, pct, ctx.user.id, new Date().toISOString(), i.flagId, i.env);
     ctx.record({ env: i.env, before: { enabled: cur.enabled === 1, rollout: cur.rollout }, after: { enabled, rollout: pct } });
     return `${f.key} is now ${fmt(enabled, pct)} in ${i.env}${ctx.approvedBy ? ` (approved by ${ctx.approvedBy.name})` : ""}.`;
@@ -89,7 +103,7 @@ export const killSwitch = defineAction({
     const f = loadFlag(flagId);
     const cur = getStateRow(flagId, "prod");
     if (!cur || cur.enabled === 0) throw new ActionError(`${f.key} is already off in prod.`);
-    db().prepare("UPDATE flags_states SET enabled = 0, rollout = 0, updated_by = ?, updated_at = ? WHERE flag_id = ? AND env = 'prod'")
+    db().prepare("UPDATE flags_states SET enabled = 0, rollout = 0, version = version + 1, updated_by = ?, updated_at = ? WHERE flag_id = ? AND env = 'prod'")
       .run(ctx.user.id, new Date().toISOString(), flagId);
     ctx.record({ env: "prod", breakGlass: true, before: { enabled: true, rollout: cur.rollout }, after: { enabled: false, rollout: 0 } });
     return `Killed ${f.key}: off in prod.`;
