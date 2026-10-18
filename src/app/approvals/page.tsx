@@ -1,4 +1,4 @@
-import { pendingFor, recentDecisions, requestsBy, type ApprovalRequest } from "@/platform/approvals";
+import { decisionBanner, getRequest, pendingFor, recentDecisions, requestsBy, type ApprovalRequest } from "@/platform/approvals";
 import { requireUser } from "@/platform/auth";
 import { getApp } from "@/platform/registry";
 import { decideApproval } from "@/platform/server-actions";
@@ -20,12 +20,19 @@ function RequestList({ rows, empty }: { rows: ApprovalRequest[]; empty: string }
   );
 }
 
-export default async function ApprovalsPage() {
+export default async function ApprovalsPage({ searchParams }: { searchParams: Promise<{ decided?: string }> }) {
   const user = await requireUser();
+  const { decided } = await searchParams;
+  const banner = decided ? decisionBanner(getRequest(Number(decided)), user) : null;
   const waiting = pendingFor(user);
   return (
     <>
       <PageHeader title="Approvals" description="Maker-checker for every app: sensitive actions wait here for a second person. You can't approve your own request." />
+      {banner && (
+        <p role="status" className={`mb-6 rounded-lg border p-3 text-sm ${banner.ok ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-red-300 bg-red-50 text-red-900"}`}>
+          {banner.message}
+        </p>
+      )}
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Waiting for you ({waiting.length})</h2>
       <div className="mb-8 space-y-3">
         {waiting.length === 0 && <p className="text-sm text-slate-500">Nothing needs your approval.</p>}

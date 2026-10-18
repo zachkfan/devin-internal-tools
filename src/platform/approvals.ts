@@ -75,9 +75,20 @@ export function decide(user: User, requestId: number, decision: "approve" | "rej
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     tx(() => {
-      decided("failed", msg);
+      decided("failed", e instanceof ActionError ? msg : "unexpected error (logged)");
       writeAudit({ actorId: user.id, app: req.app, action: req.action, outcome: "error", target: req.target ?? undefined, reason, details: { approvalId: req.id, error: msg } });
     });
     return { ok: false, message: `Approval failed and was rolled back: ${e instanceof ActionError ? msg : "unexpected error (logged)"}.` };
   }
+}
+
+/**
+ * Confirmation shown to the decider after a decision. The decided card leaves the pending list on revalidate,
+ * so the form's own message would be lost. Derived from stored state (never from the URL) and only shown to the decider.
+ */
+export function decisionBanner(req: ApprovalRequest | undefined, user: User): { ok: boolean; message: string } | null {
+  if (!req || req.status === "pending" || req.decided_by !== user.id) return null;
+  if (req.status === "approved") return { ok: true, message: `Approved and executed request #${req.id}: ${req.summary}` };
+  if (req.status === "rejected") return { ok: true, message: `Rejected request #${req.id}: ${req.summary}` };
+  return { ok: false, message: `Request #${req.id} failed and was rolled back: ${req.decision_reason}` };
 }

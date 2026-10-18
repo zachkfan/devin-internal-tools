@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { claimCase, decideCase, revealPii } from "@/app/apps/kyc/_app/actions";
 import { getCase } from "@/app/apps/kyc/_app/queries";
-import { decide, pendingFor } from "@/platform/approvals";
+import { decide, decisionBanner, getRequest, pendingFor } from "@/platform/approvals";
 import { listAudit, verifyAuditChain } from "@/platform/audit";
 import { getUser } from "@/platform/auth";
 import { db, resetDbForTests } from "@/platform/db";
@@ -78,6 +78,26 @@ describe("maker-checker approvals", () => {
     expect(decide(u("priya"), req.id, "reject", "need EDD first")?.ok).toBe(true);
     expect(status(id)).toBe("pending");
     expect(decide(u("priya"), req.id, "approve", "changed mind")?.ok).toBe(false);
+  });
+});
+
+describe("approval confirmation banner", () => {
+  it("is derived from stored state and shown only to the decider", () => {
+    const id = firstCase("risk_score >= 70 AND status = 'pending'");
+    decideCase.invoke(u("ana"), { caseId: id, decision: "approve" }, "looks fine");
+    const req = pendingFor(u("omar"))[0];
+    expect(decisionBanner(getRequest(req.id), u("omar"))).toBeNull();
+    decide(u("omar"), req.id, "approve", "checked");
+    expect(decisionBanner(getRequest(req.id), u("omar"))).toMatchObject({ ok: true, message: expect.stringMatching(/^Approved and executed request #\d+: Approve high-risk KYC case/) });
+    expect(decisionBanner(getRequest(req.id), u("priya"))).toBeNull();
+    expect(decisionBanner(getRequest(req.id), u("ana"))).toBeNull();
+  });
+
+  it("reports a rejection", () => {
+    decideCase.invoke(u("ana"), { caseId: firstCase("risk_score >= 70 AND status = 'pending'"), decision: "approve" }, "ok");
+    const req = pendingFor(u("priya"))[0];
+    decide(u("priya"), req.id, "reject", "needs EDD");
+    expect(decisionBanner(getRequest(req.id), u("priya"))).toMatchObject({ ok: true, message: expect.stringMatching(/^Rejected request/) });
   });
 });
 
