@@ -61,7 +61,9 @@ export default async function FlagPage({ params }: { params: Promise<{ id: strin
               </div>
               {canEdit ? (
                 <>
+                  {/* Remount on every write: React keeps a <select>'s old selection after an action, so the form would show stale state. */}
                   <ActionForm
+                    key={s.version}
                     action={setFlagState}
                     hidden={{ flagId: f.id, env, fromEnabled: s.enabled ? "on" : "off", fromRollout: s.rollout, fromVersion: s.version }}
                     fields={[
