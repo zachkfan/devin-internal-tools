@@ -48,7 +48,7 @@ export default async function RefundsDashboardPage({ searchParams }: { searchPar
 
       {tab === "transactions" && (
         <>
-          <form action="/apps/refunds" className="mb-4 flex flex-wrap gap-2">
+          <form key={`${q}|${state ?? ""}|${sort}`} action="/apps/refunds" className="mb-4 flex flex-wrap gap-2">
             <input name="q" defaultValue={q} placeholder="Search customer, merchant, card last 4 or transaction #"
               className="w-full max-w-md rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none" />
             <select name="status" defaultValue={state ?? ""} aria-label="Refund status" className={SELECT_CLASS}>
